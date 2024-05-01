@@ -68,7 +68,6 @@ void setup() {
   SerialMon.println("Modem Info: " + modemInfo);
 }
 
-// a loop that counts the seconds since the program is ran 
 void loop() {
   // Set SIM7000G GPIO4 HIGH ,turn on GPS power
   // CMD:AT+SGPIO=0,4,1,1
@@ -84,7 +83,7 @@ void loop() {
   float lat      = 0;
   float lon      = 0;
   float speed    = 0;
-  float alt     = 0;
+  float alt      = 0;
   int   vsat     = 0;
   int   usat     = 0;
   float accuracy = 0;
