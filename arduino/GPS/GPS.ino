@@ -1,7 +1,13 @@
 #define TINY_GSM_MODEM_SIM7600 //needs to be defined before including TINYGsmClient
 #define TINY_GSM_RX_BUFFER 1024 // Set RX buffer to 1Kb
 
+#include "WiFi.h" // to connect to wifi
 #include <TinyGsmClient.h> // for GPS module
+#include "secrets.h" // to get network name and password
+
+// Wifi and password
+const char* ssid = SECRET_SSID;
+const char* password =  SECRET_PASS;
 
 // LilyGO T-SIM7600G Pinout
 #define UART_BAUD   115200
@@ -20,6 +26,15 @@ TinyGsm modem(SerialAT);
 
 void setup() {
   SerialMon.begin(115200);
+  WiFi.begin(ssid, password);
+
+  while (WiFi.status() != WL_CONNECTED){
+    delay(500);
+    SerialMon.println("connecting to wifi...\n");
+  }
+  SerialMon.println("Wifi Connected!!!\n");
+  SerialMon.println("IP Address:");
+  SerialMon.println(WiFi.localIP());
 
   // Set LED OFF
   pinMode(LED_PIN, OUTPUT);
@@ -55,7 +70,7 @@ void setup() {
 
 // a loop that counts the seconds since the program is ran 
 void loop() {
-  // Set SIM7000G GPIO4 HIGH, turn on GPS power
+  // Set SIM7000G GPIO4 HIGH ,turn on GPS power
   // CMD:AT+SGPIO=0,4,1,1
   // Only in version 20200415 is there a function to control GPS power
   modem.sendAT("+SGPIO=0,4,1,1");
