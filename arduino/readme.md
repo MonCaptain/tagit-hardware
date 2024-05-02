@@ -7,5 +7,6 @@
 4. From the drop down menu next to the Verify/Upload/Debug buttons on the top left, select ESP32 Dev Module as the board to develop on 
 5. Within the Arduino IDE, install the following libraries from library manager 
 	- TinyGSM
-	- PubSubClient Library for MQTT requests using the following link: https://github.com/knolleary/pubsubclient
+	- ArduinoMqttClient
+	- ~~PubSubClient Library for MQTT requests using the following link: https://github.com/knolleary/pubsubclient~~
 
