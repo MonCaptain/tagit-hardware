@@ -7,14 +7,20 @@
 #include <ArduinoMqttClient.h>
 #include <WiFiClientSecure.h>
 // Function prototypes
+
 String getGPSString();
+String getGPSString2();
 void connectWifi();
 void connectAWS();
+void enableGPSPower();
+void disableGPSPower();
 
 // Wifi and password
 const char* ssid = SECRET_SSID;
 const char* password =  SECRET_PASS;
-const String topic = "location/bus1"; // for MQTT 
+// MQTT publisher / subscriber
+const String topic = SECRET_MQTT_TOPIC;
+const String BUS_NAME = SECRET_CLIENT_DEVICE;
 
 // LilyGO T-SIM7600G Pinout
 #define UART_BAUD   115200
@@ -76,77 +82,74 @@ void loop() {
   // get GPS coordinates
   modem.maintain();
   String coordinatesString = getGPSString();
+  // String coordinatesString = "this is test coordinate string";
   // send coordinates in the form of "latitude,longitude"   
   mqttClient.beginMessage(topic);
+  SerialMon.println(coordinatesString);
   mqttClient.print(coordinatesString);
   mqttClient.endMessage();
   
   delay(5000);
 }
 
-
-String getGPSString(){
-    // Set SIM7000G GPIO4 HIGH ,turn on GPS power
-  // CMD:AT+SGPIO=0,4,1,1
-  // Only in version 20200415 is there a function to control GPS power
-  modem.sendAT("+SGPIO=0,4,1,1");
+void enableGPSPower() {
+  modem.sendAT("+SGPIO=0,4,1,1");  // Enable GPS power
   if (modem.waitResponse(10000L) != 1) {
-    SerialMon.println(" SGPIO=0,4,1,1 false ");
+    SerialMon.println("Failed to enable GPS power");
   }
-
   modem.enableGPS();
+}
+
+void disableGPSPower() {
+  SerialMon.println("Disabling GPS");
+  modem.sendAT("+SGPIO=0,4,1,0");  // Disable GPS power
+  if (modem.waitResponse(10000L) != 1) {
+    SerialMon.println("Failed to disable GPS power");
+  }
+  modem.disableGPS();
+}
+
+String getGPSString() {
+  enableGPSPower();  
+  delay(15000);      
+
+  float lat = 0, lon = 0, speed = 0, alt = 0, accuracy = 0;
+  int vsat = 0, usat = 0, year = 0, month = 0, day = 0;
+  int hour = 0, min = 0, sec = 0;
   
-  delay(15000);
-  float lat      = 0;
-  float lon      = 0;
-  float speed    = 0;
-  float alt      = 0;
-  int   vsat     = 0;
-  int   usat     = 0;
-  float accuracy = 0;
-  int   year     = 0;
-  int   month    = 0;
-  int   day      = 0;
-  int   hour     = 0;
-  int   min      = 0;
-  int   sec      = 0;
-  
-  for (int8_t i = 15; i; i--) {
-    SerialMon.println("Requesting current GPS/GNSS/GLONASS location");
-    if (modem.getGPS(&lat, &lon, &speed, &alt, &vsat, &usat, &accuracy,
-                     &year, &month, &day, &hour, &min, &sec)) {
-      SerialMon.println("Latitude: " + String(lat, 8) + "\tLongitude: " + String(lon, 8));
-      SerialMon.println("Speed: " + String(speed) + "\tAltitude: " + String(alt));
-      SerialMon.println("Visible Satellites: " + String(vsat) + "\tUsed Satellites: " + String(usat));
-      SerialMon.println("Accuracy: " + String(accuracy));
-      SerialMon.println("Year: " + String(year) + "\tMonth: " + String(month) + "\tDay: " + String(day));
-      SerialMon.println("Hour: " + String(hour) + "\tMinute: " + String(min) + "\tSecond: " + String(sec));
+  char jsonString[256];  // Buffer to hold final JSON
+  String busName = BUS_NAME;
+
+  for (int8_t i = 5; i; i--) {
+    SerialMon.println("Requesting current GPS location");
+    
+    if (modem.getGPS(&lat, &lon, &speed, &alt, &vsat, &usat, &accuracy, &year, &month, &day, &hour, &min, &sec)) {
+      SerialMon.println("GPS data retrieved successfully");
       break;
-    } 
-    else {
-      SerialMon.println("Couldn't get GPS/GNSS/GLONASS location, retrying in 15s.");
-      delay(15000L);
-      if (i == 0) {
-        return "couldn't get any coordinates";
+    } else {
+      SerialMon.println("Failed to get GPS data, retrying...");
+      delay(5000L);  // Retry after 5 seconds
+      
+     if (i == 1) { 
+        disableGPSPower();  
+        sprintf(jsonString, "{\"message\": {\"error\": \"could not retrieve GPS coordinates for %s\"}}", busName.c_str());
+        return jsonString;
       }
     }
   }
-  SerialMon.println("Retrieving GPS/GNSS/GLONASS location again as a string");
-  String gps_raw = modem.getGPSraw();
-  SerialMon.println("GPS/GNSS Based Location String: " + gps_raw);
-  // SerialMon.println("Disabling GPS");
-  // modem.disableGPS();
 
-//   Set SIM7000G GPIO4 LOW ,turn off GPS power
-//   CMD:AT+SGPIO=0,4,1,0
-//   Only in version 20200415 is there a function to control GPS power
-//   modem.sendAT("+SGPIO=0,4,1,0");
-//   if (modem.waitResponse(10000L) != 1) {
-//     SerialMon.println(" SGPIO=0,4,1,0 false ");
-//   }
+  // Construct the JSON string after successful GPS data retrieval
+  sprintf(jsonString, "{\"message\": \"{\\\"name\\\": \\\"%s\\\", \\\"latitude\\\": \\\"%.8f\\\", \\\"longitude\\\": \\\"%.8f\\\"}\"}", 
+          busName.c_str(), lat, lon);
 
-  return String(lat, 8) + "," + String(lon, 8);
+  disableGPSPower();  // Disable GPS power after use
+
+  // Print the final JSON string
+  SerialMon.println(jsonString);
+  
+  return jsonString;
 }
+
 
 void connectWifi() {
   WiFi.begin(ssid, password);
