@@ -74,8 +74,8 @@ void setup() {
   SerialMon.println(signalQuality);
 
   // Connect to the cellular network
-  connectCellular();
-
+  // connectCellular();
+  connectWifi();
   // Connect to AWS IoT
   connectAWS();
 }
@@ -106,7 +106,6 @@ void connectCellular() {
     Serial.println("Waiting for network...");
     if (!modem.waitForNetwork(60000)) {  // Wait up to 60 seconds for network registration
         Serial.println("Network connection failed!");
-        connectWifi();
         return;
     }
 
