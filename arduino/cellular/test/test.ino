@@ -2,13 +2,10 @@
 #define TINY_GSM_MODEM_SIM7600
 
 #define TINY_GSM_RX_BUFFER 1024 // Set RX buffer to 1Kb
-#include "Adafruit_FONA.h"
-#include <HardwareSerial.h>
+
 #include <TinyGsmClient.h>
 #include "secrets.h" // to get network name and password
 #include <PubSubClient.h>
-#include <SSLClientESP32.h>
-
 
 // LilyGO T-SIM7000G Pinout
 #define UART_BAUD   115200
@@ -24,37 +21,19 @@
 // Set serial for AT commands
 #define SerialAT  Serial1
 
-
 // function prototypes 
 boolean mqttConnect();
 String getGPSString();
 void enableGPSPower();
 void disableGPSPower();
+String gpsTestString();
 
+// init GPRS modem and mqtt client
 TinyGsm modem(SerialAT);  
-TinyGsmClient base_client(modem, 0);
-SSLClientESP32 client(&base_client);
+TinyGsmClient client(modem);
 PubSubClient mqtt(client);
-unsigned long lastReconnectAttempt = 0;
-
-// GPRS
-const int FONA_RST = 34;
-const int RELAY_PIN = 13;
-char replybuffer[255];
-uint8_t readline(char *buff, uint8_t maxbuff, uint16_t timeout = 0);
-String smsString = "";
-char fonaNotificationBuffer[64];          //for notifications from the FONA
-char smsBuffer[250];
-HardwareSerial *fonaSerial = &SerialAT;
-  
-Adafruit_FONA_3G fona = Adafruit_FONA_3G(FONA_RST);
-
-unsigned long timeout;
-char charArray[20];
-unsigned char data_buffer[4] = {0};
-char buff[10];
-#define SMS_TARGET  "+13472376074"
 const char APN[32] = SECRET_CELLULAR_APN;
+uint32_t lastReconnectAttempt = 0;
 
 void setup(){
   SerialMon.begin(115200);
@@ -74,7 +53,6 @@ void setup(){
   
   // Set module baud rate and UART pins
   SerialAT.begin(UART_BAUD, SERIAL_8N1, PIN_RX, PIN_TX);
-  fonaSerial->begin(UART_BAUD,SERIAL_8N1,PIN_RX, PIN_TX, false);
   // Restart takes quite some time
   // To skip it, call init() instead of restart()
   SerialMon.println("Initializing modem...");
@@ -105,22 +83,9 @@ void setup(){
   if (modem.waitResponse(10000L) != 1) {
     SerialMon.println(" SGPIO=0,4,1,1 false ");
   }
-
   modem.enableGPS();
   delay(15000);
-
-  
-  if (!fona.begin(*fonaSerial))
-  {
-    Serial.println(F("Couldn't find FONA"));
-    while(1);
-  }
-  Serial.println(F("FONA is OK"));
-
-  fonaSerial->print("AT+CNMI=2,1\r\n");  //set up the FONA to send a +CMTI notification when an SMS is received
-  Serial.println("FONA Ready");
-
-  // Test cellular connectivity
+  // test cellular connectivity
   SerialMon.println("Checking for cellular connectivity...");
   if (modem.waitForNetwork(30000)) { // wait up to 30 seconds for network
     SerialMon.println("Connected to cellular network!");
@@ -134,43 +99,32 @@ void setup(){
     } else {
       SerialMon.println("Failed to obtain IP address.");
     }
-    
-    modem.sendAT("AT+PING=\"8.8.8.8\"");  // Ping Google's public DNS server
-    if (modem.waitResponse(10000L, "OK") == 1) {
-      SerialMon.println("Ping successful!");
-    } else {
-      SerialMon.println("Ping failed.");
-    }
   } else {
     SerialMon.println("Failed to connect to cellular network.");
   }
-  // fona.sendSMS("+13472376074", "ready to go");
-  // modem.sendSMS(SMS_TARGET, "ready to go");
+  mqtt.setServer("broker.emqx.io", 1883);
+  delay(500);
+  mqttConnect();
 }
 
 void loop() {
-  
-  // get GPS coordinates
+
   modem.maintain();
-  // String coordinatesString = getGPSString();
-  // String coordinatesString = "this is test coordinate string";
-  // modem.sendSMS("+13472376074", coordinatesString);
-  // send coordinates in the form of "latitude,longitude"   
-  // SerialMon.println(coordinatesString);
-  
-    if (!mqtt.connected()) {
-    SerialMon.println("=== MQTT NOT CONNECTED ===");
-    // Reconnect every 10 seconds
-    uint32_t t = millis();
-    if (t - lastReconnectAttempt > 10000L) {
-      lastReconnectAttempt = t;
-      if (mqttConnect()) { lastReconnectAttempt = 0; }
-    }
-    delay(100);
-    return;
-  }
-  mqtt.loop();
+  // if (!mqtt.connected()) {
+  //   SerialMon.println("=== MQTT NOT CONNECTED ===");
+  //   // Reconnect every 10 seconds
+  //   uint32_t t = millis();
+  //   if (t - lastReconnectAttempt > 10000L) {
+  //     lastReconnectAttempt = t;
+  //     if (mqttConnect()) { lastReconnectAttempt = 0; }
+  //   }
+  //   delay(100);
+  //   return;
+  // } 
   delay(5000);
+  String coordinatesJson = getGPSString();   
+  SerialMon.println(coordinatesJson);
+  mqtt.publish(SECRET_MQTT_TOPIC, coordinatesJson.c_str());
 }
 
 void enableGPSPower() {
@@ -231,36 +185,29 @@ String getGPSString() {
   return jsonString;
 }
 
+boolean mqttConnect() {
+  SerialMon.print("Connecting to ");
+  SerialMon.print(MQTT_BROKER_ENDPOINT);
 
-void connectMQTT() {
-    // Set SSL/TLS certificates
-    
-    
-    client.setCACert(AWS_CERT_CA);
-    client.setCertificate(AWS_CERT_CRT);
-    client.setPrivateKey(AWS_CERT_PRIVATE);
-    
-    // Set MQTT server and port
-    mqtt.setServer(SECRET_AWS_ENDPOINT, 8883);  // AWS IoT Core uses port 8883 for secure MQTT
+  boolean status = mqtt.connect(SECRET_CLIENT_DEVICE);
 
-    SerialMon.println("Connecting to AWS IoT Core...");
-    
-    // Attempt MQTT connection
-    while (!mqtt.connected()) {
-        if (mqtt.connect(SECRET_CLIENT_DEVICE)) {
-            SerialMon.println("MQTT connected successfully!");
-        } else {
-            SerialMon.print("MQTT connection failed. Error code: ");
-            SerialMon.println(mqtt.state());
-            SerialMon.println("Retrying in 5 seconds...");
-            delay(5000);
-        }
-    }
+  if (status == false) {
+    SerialMon.println(" fail");
+    return false;
+  }
+  SerialMon.println(" success");
+  // mqtt.publish(SECRET_MQTT_TOPIC, "{\"message\": {\"error\": \"could not retrieve GPS coordinates for bus1\"}}");
+  // mqtt.publish(SECRET_MQTT_TOPIC, gpsTestString());
+  mqtt.publish(SECRET_MQTT_TOPIC, "shuttle1 ready");
+  mqtt.subscribe(SECRET_MQTT_TOPIC);
+  return mqtt.connected();
+}
 
-    // Subscribe to topics (optional, only if you expect to receive messages)
-    if (mqtt.subscribe(SECRET_MQTT_TOPIC)) {
-        SerialMon.println("Subscribed to topic: " + String(SECRET_MQTT_TOPIC));
-    } else {
-        SerialMon.println("Failed to subscribe to topic.");
-    }
+String gpsTestString() {
+  char jsonString[256];
+  String busName = SECRET_CLIENT_DEVICE;
+  float lat = 40.813540, lon = -73.955286;
+  sprintf(jsonString, "{\"message\": \"{\\\"name\\\": \\\"%s\\\", \\\"latitude\\\": \\\"%.8f\\\", \\\"longitude\\\": \\\"%.8f\\\"}\"}", 
+          busName.c_str(), lat, lon);
+  return jsonString;
 }
